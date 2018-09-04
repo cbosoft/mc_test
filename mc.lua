@@ -1,156 +1,87 @@
-local math,table,ipairs,io = math,table,ipairs,io
+#!/usr/bin/lua
 --[[
-   
-   Monte-Carlo simulation of a box of N particles with sidelength L.
+* Monte-Carlo simulation to calculate pi
 
-   Metropolis-Hastings algorithm used to find the probability that a 
-   particle occupies a small section of the sim-box.
-]]
+(See Wikipedia: https://.en.wikipedia.org/wiki/Monte_Carlo_method)
+  
+* Method
+- Construct square of unit sidelength
+- Position $N particles randomly
+- Form probability distribution of (is r(p) <= 1?)
+- P(r <= 1) / N = \pi/4
 
+* General method
+We're looking to reconstrct an unknown /pdf/, in the above case the 
+probability a randomly place particle is within the quadrant of a circle. This
+is used to gain information about the ratio of areas, and thus used to obtain a
+value for pi. 
 
-function arradd(a1, a2, l)
-   res = {}
-   for d=1,3 do
-      table.insert(res, a1[d]+a2[d])
-   end
-   for d=1,3 do
-      if res[d] > l then
-	 res[d] = res[d] - l
-      elseif res[d] < 0 then
-	 res[d] = res[d] + l
-      end
-   end
-   return res
-end      
+To gain information about a system, create an /ensemble/ of state 
+configurations to gain statistics, forming the desired /pdf/.
 
+--]]
 
-function get_distance(dr)
-   local d2 = 0
-   for d=1,3 do
-      d2 = d2 + dr[d]*dr[d]
-   end
+local math,table,ipairs = math,table,ipairs
 
-   local d = math.pow(d2, 0.5)
-   return d
+-- simple pythagoras' theorem to get length of long side of triangle
+function get_distance(p)
+  local h = math.pow(math.pow(p.x, 2) + math.pow(p.y, 2), 0.5)
+  return h
+end
+
+-- returns a random 2D position in the range (0,0) to (1,1)
+function random_position()
+	local xpos, ypos = math.random(), math.random()
+  local position = {x=xpos, y=ypos}
+	return position 
 end
 
 
-function lennard_jones(ri, rj)
-   local dr = {}
-   for d=1,3 do
-      dr[d] = rj[d] - ri[d]
-   end
+-- modulus :(
+function mod(a,b)
+  return a - math.ceil(a/b)*b
+end
 
-   local r = get_distance(dr)
-   local rinv = 1/r
-   local U = math.pow(rinv, 12) - 2*math.pow(rinv, 6)
-   return U
+-- displays progress in the form of a percentage
+function progress(n, N)
+  local percentage = 100 * n / N
+  if mod(percentage, 10) == 0 then io.write("\r"..percentage.."%") io.flush() end
 end
 
 
-function yukawa(ri, rj)
-   local dr = {}
-   for d=1,3 do
-      dr[d] = rj[d] - ri[d]
-   end
+-- fills a square with N particles with uniform random position
+function init (N)
+  local system = {}
+	
+  for n=1,N do
+    system[n] = {}
+		system[n].x = math.random()
+    system[n].y = math.random()
+    progress(n,N)
+	end
 
-   local r = get_distance(dr)
-   local rinv = 1/r
-   local U = rinv*math.exp(rinv)
-   return U
+	return system
 end
 
+-- Main program loop
+function main (arg)
+  local pi, pin, N = 0, 0, arg[1] or 1000
 
-local potential = yukawa
+  system = init(N)
+  for i,position in ipairs(system) do
+  	if get_distance(position) <= 1 then pin = pin + 1 end
+  end
 
-
-function energy(system)
-   local tot = 0
-
-   for i,ri in ipairs(system.positions) do
-      for j,rj in ipairs(system.positions) do
-	 if j >= i then break end
-	 tot = tot + potential(ri, rj)
-      end
-   end
-
-   return tot/system.N
+  pi = 4 * pin / N
+  io.write("\rPi: "..pi.."\n")
+  return pi
 end
 
-
-function randarr(dim,scale)
-   arr = {}
-
-   for d=1,dim do
-      table.insert(arr, scale*math.random())
-   end
-   
-   return arr
+local tot, n = 0, 0
+for i=1,10 do
+  tot = tot + main(arg)
+  n = n + 1
 end
-
-
-function init(arg)
-   if arg.d then
-      if arg.L then
-	 arg.N = math.pow(arg.L, 3)*arg.d
-      elseif arg.N then
-	 arg.L = math.pow(arg.N/arg.d,1/3)
-      end
-   end
-   
-   local system = {N=arg.N, L=arg.L, d=arg.D, positions={}}
-   for n=1,system.N do
-      table.insert(system.positions, randarr(3, system.L))
-   end
-   return system
-end
-
-
-function permutate(system)
-   for i,position in ipairs(system.positions) do
-      system.positions[i] = arradd(position, randarr(3,system.L*(1-2*math.random())), system.L)
-   end
-   return system
-end
-
-function probability(system)
-   local nin, nout = 0, 0
-
-   for i,pos in ipairs(system) do
-      if (pos[1] < 0.1*system.L and pos[2] < 0.1*system.L and pos[3] < 0.1*system.L) then
-	 nin = nin + 1
-      else
-	 nout = nout + 1
-      end
-   end
-
-   return nin / system.N
-end
-
-
--- Initialise
-local system = init{N=10,L=1}
-
-
--- Main loop
-local T = 100000
-io.stderr:write("0%")
-for t=1,T do
-   local p = t*100/T
-   if p % 10 == 0 then
-      io.stderr:write("\r"..p.."%")
-   end
-
-   local new_system = permutate(system)
-   local new_energy = energy(new_system)
-   
-   local p_new_system = probability(new_system) --math.exp(-new_energy)
-   local p_old_system = probability(system) --math.exp(-energy(system))
-   local p_ratio = p_new_system / p_old_system
-   
-   if ((p_ratio >= 1) or (math.random() <= p_ratio)) then
-      print( new_energy )
-      --print(system.positions[1][1])
-   end
-end
-io.stderr:write("\ndone\n")
+local av = tot/n
+local err = av - math.pi
+io.write(n.." runs, with average "..av.." (err="..err..")\n")
